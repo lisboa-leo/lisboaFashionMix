@@ -1,0 +1,87 @@
+* {
+  padding: 0;
+  margin: 0;
+  box-shadow: none;
+  font-family: "Sora", sans-serif;
+}
+
+.nav-link-custom {
+  color: white;
+  text-decoration: none;
+  border-radius: 5px;
+  transition: background 0.2s ease;
+}
+
+.nav-link-custom:hover {
+  background-color: #d4af37;
+  color: white !important;
+}
+
+.nav-link-custom.active {
+  background-color: #e22a1b;
+  color: white !important;
+  font-weight: bold;
+}
+
+.icon-white {
+  color: white;
+}
+
+.section-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  padding-left: 1rem;
+  margin-bottom: 0.5rem;
+  opacity: 0.6;
+  color: #ccc;
+}
+
+.icon-box {
+  background-color: #e22a1b;
+  padding: 0.4rem;
+  border-radius: 0.4rem;
+  color: white;
+}
+
+.btn-logout {
+  background: transparent;
+  color: white;
+  border: 1px solid #dc3545;
+}
+
+.btn-logout:hover {
+  background-color: #dc3545;
+  color: white;
+}
+
+.toggle-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.toggle-btn:hover {
+  background-color: #ff4f46;
+}
+
+.toggle-btn:active {
+  background-color: #ff4f46;
+}
+
+.toggle-btn:hover .toggle-icon {
+  stroke: #fff;
+}
+
+.bg-selected-payment {
+  background-color: #1B2428 !important;
+  border-color: #1B2428 !important;
+}
+
+.nav-pills .nav-link.active {
+  background-color: #f6f7f8 !important; 
+  color: #1B2428 !important;
+}
