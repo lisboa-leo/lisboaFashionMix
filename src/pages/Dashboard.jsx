@@ -12,8 +12,8 @@ export default function Dashboard() {
       <Container className="mt-3">
         <div className="d-flex justify-content-between align-items-center mb-2">
           <div>
-            <h2 className="fw-bold mb-1 text-dark">Relatórios</h2>
-            <p className="text-secondary">Análises e indicadores do negócio</p>
+            <h2 className="fw-bold mb-1 text-dark">Dashboard</h2>
+            <p className="text-secondary">Visao geral do sistema de gestao</p>
           </div>
         </div>
 
