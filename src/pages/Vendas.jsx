@@ -14,6 +14,8 @@ import { listarProdutos } from "../contexts/services/ProdutoService";
 import InputMask from "react-input-mask";
 import { ToastContainer } from "react-toastify";
 import { toast } from "react-toastify";
+import { NumericFormat } from "react-number-format";
+import { buscarClientePorCpfCnpj } from "../contexts/services/ClienteService";
 
 export default function Vendas() {
   const notifySuccess = (msg) => toast.success(msg);
@@ -24,6 +26,7 @@ export default function Vendas() {
 
   const [codigo, setCodigo] = useState("");
   const [cpfNaNota, setCpfNaNota] = useState(false);
+  const [clienteSelecionado, setClienteSelecionado] = useState(null);
   const [cart, setCart] = useState([]);
   const [multiPagamentos, setMultiPagamentos] = useState(false);
   const [pagamentos, setPagamentos] = useState([]);
@@ -31,10 +34,13 @@ export default function Vendas() {
     tipoPagamento: "cash",
     valor: 0,
   });
+
   const [cpf, setCpf] = useState("");
+  const [cpfCnpj, setCpfCnpj] = useState("");
   const [sugestoes, setSugestoes] = useState([]);
   const [isFocused, setIsFocused] = useState(false);
   const [produtos, setProdutos] = useState([]);
+  const [pagamentoMultiplo, setPagamentoMultiplo] = useState(false);
 
   const total = cart.reduce((acc, item) => acc + item.qtd * item.preco, 0);
 
@@ -42,16 +48,55 @@ export default function Vendas() {
 
   const paymentLabels = { cash: "Dinheiro", card: "Cartão", pix: "PIX" };
 
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+
   useEffect(() => {
-    async function carregarProdutos() {
-      try {
-        const data = await listarProdutos();
-        console.log("Produtos recebidos:", data);
-        setProdutos(data);
-      } catch (err) {
-        console.error("Erro ao buscar produtos", err);
+    const buscarCliente = async () => {
+      const somenteNumeros = cpfCnpj.replace(/\D/g, "");
+
+      if (!somenteNumeros || somenteNumeros.trim() === "") {
+        setClienteSelecionado(null);
+        return;
       }
+
+      try {
+        const cliente = await buscarClientePorCpfCnpj(somenteNumeros);
+        setClienteSelecionado(cliente);
+      } catch (error) {
+        setClienteSelecionado(null);
+        notifyError("Cliente não encontrado.");
+      }
+    };
+
+    if (cpfNaNota) {
+      buscarCliente();
+    } else {
+      setClienteSelecionado(null);
     }
+  }, [cpfCnpj, cpfNaNota]);
+
+  const handleCpfCnpjChange = (e) => {
+    const valor = e.target.value;
+
+    if (/[.\-\/]/.test(valor)) {
+      notifyError("Não use pontos, traços ou barras. Digite apenas números.");
+      return;
+    }
+
+    setCpfCnpj(valor);
+  };
+
+  const carregarProdutos = async () => {
+    try {
+      const data = await listarProdutos();
+      console.log("Produtos recebidos:", data);
+      setProdutos(data);
+    } catch (err) {
+      console.error("Erro ao buscar produtos", err);
+    }
+  };
+
+  useEffect(() => {
     carregarProdutos();
   }, []);
 
@@ -73,38 +118,45 @@ export default function Vendas() {
 
   const adicionarProduto = (e) => {
     e.preventDefault();
-    const produto = buscarProduto(codigo.trim());
+    const codigoTrim = codigo.trim();
+    if (!codigoTrim) return;
 
-    if (produto) {
-      if (produto.estoque === 0 || produto.estoque === undefined) {
-        notifyInfo("Produto sem estoque disponível.");
+    const produto = buscarProduto(codigoTrim);
+
+    if (!produto) {
+      notifyInfo("Produto não encontrado.");
+      setCodigo("");
+      return;
+    }
+
+    const quantidadeEstoque = produto.estoque?.quantidade ?? 0;
+    console.log("Quantidade " + quantidadeEstoque);
+
+    if (quantidadeEstoque <= 0) {
+      notifyInfo("Produto sem estoque disponível.");
+      setCodigo("");
+      return;
+    }
+
+    const existente = cart.find((item) => item.idProduto === produto.idProduto);
+
+    if (existente) {
+      if (existente.qtd + 1 > quantidadeEstoque) {
+        notifyInfo("Quantidade solicitada maior que o estoque disponível.");
         setCodigo("");
         return;
       }
-
-      const existente = cart.find(
-        (item) => item.idProduto === produto.idProduto
+      setCart(
+        cart.map((item) =>
+          item.idProduto === produto.idProduto
+            ? { ...item, qtd: item.qtd + 1 }
+            : item
+        )
       );
-
-      if (existente) {
-        if (existente.qtd + 1 > produto.estoque) {
-          notifyInfo("Quantidade solicitada maior que o estoque disponível.");
-          setCodigo("");
-          return;
-        }
-        setCart(
-          cart.map((item) =>
-            item.idProduto === produto.idProduto
-              ? { ...item, qtd: item.qtd + 1 }
-              : item
-          )
-        );
-      } else {
-        setCart([...cart, { ...produto, qtd: 1 }]);
-      }
     } else {
-      notifyInfo("Produto não encontrado.");
+      setCart([...cart, { ...produto, qtd: 1 }]);
     }
+
     setCodigo("");
   };
 
@@ -115,26 +167,66 @@ export default function Vendas() {
   const alterarQuantidade = (idProduto, novaQtd) => {
     if (novaQtd <= 0) {
       removerProduto(idProduto);
-    } else {
-      setCart(
-        cart.map((item) =>
-          item.idProduto === idProduto ? { ...item, qtd: novaQtd } : item
-        )
-      );
+      return;
     }
+
+    const produto = produtos.find((p) => p.idProduto === idProduto);
+    if (!produto) {
+      notifyError("Produto não encontrado no estoque.");
+      return;
+    }
+
+    const quantidadeEstoque = produto.estoque?.quantidade ?? 0;
+
+    if (novaQtd > quantidadeEstoque) {
+      notifyInfo(
+        `Quantidade solicitada (${novaQtd}) maior que o estoque disponível (${quantidadeEstoque}).`
+      );
+      return;
+    }
+
+    setCart(
+      cart.map((item) =>
+        item.idProduto === idProduto ? { ...item, qtd: novaQtd } : item
+      )
+    );
   };
 
   const finalizarVenda = async () => {
+    for (const item of cart) {
+      const produtoEstoque =
+        produtos.find((p) => p.idProduto === item.idProduto)?.estoque
+          ?.quantidade ?? 0;
+      if (item.qtd > produtoEstoque) {
+        notifyError(
+          `Produto "${item.nome}" com quantidade (${item.qtd}) maior que o estoque disponível (${produtoEstoque}).`
+        );
+        return;
+      }
+    }
+
     try {
-      const vendaDTO = {
-        idUsuario: usuarioLogado?.idUsuario || 0,
-        idCliente: cpfNaNota ? null : null,
-        itens: cart.map((item) => ({
-          idProduto: item.idProduto,
-          quantidade: item.qtd,
-          precoUnitario: item.preco,
-        })),
-        pagamentos: pagamentos.map((p) => ({
+      let pagamentosFinal = [];
+
+      if (!pagamentoMultiplo) {
+        pagamentosFinal = [
+          {
+            tipoPagamento:
+              paymentMethod.toUpperCase() === "CASH"
+                ? "DINHEIRO"
+                : paymentMethod.toUpperCase() === "CARD"
+                ? "CARTAO"
+                : "PIX",
+            valor: total,
+          },
+        ];
+      } else {
+        const totalPago = pagamentos.reduce((acc, p) => acc + p.valor, 0);
+        if (totalPago < total) {
+          notifyInfo("O valor total ainda não foi pago.");
+          return;
+        }
+        pagamentosFinal = pagamentos.map((p) => ({
           tipoPagamento:
             p.tipoPagamento.toUpperCase() === "CASH"
               ? "DINHEIRO"
@@ -142,7 +234,19 @@ export default function Vendas() {
               ? "CARTAO"
               : "PIX",
           valor: p.valor,
+        }));
+      }
+
+      const vendaDTO = {
+        idUsuario: usuarioLogado?.idUsuario || 0,
+        idCliente:
+          cpfNaNota && clienteSelecionado ? clienteSelecionado.idCliente : null,
+        itens: cart.map((item) => ({
+          idProduto: item.idProduto,
+          quantidade: item.qtd,
+          precoUnitario: item.preco,
         })),
+        pagamentos: pagamentosFinal,
       };
 
       await salvarVenda(vendaDTO);
@@ -152,10 +256,13 @@ export default function Vendas() {
       setCpf("");
       setCpfNaNota(false);
       setPagamentos([]);
+      setPagamentoMultiplo(false);
+      setPaymentMethod("cash");
     } catch (error) {
       console.error(error);
       notifyError("Erro ao finalizar a venda.");
     }
+    carregarProdutos();
   };
 
   return (
@@ -203,16 +310,21 @@ export default function Vendas() {
                 className="fw-semibold"
               />
               {cpfNaNota && (
-                <Form.Control
-                  required
-                  type="text"
-                  placeholder="CPF"
-                  as={InputMask}
-                  mask="999.999.999-99"
-                  value={cpf}
-                  className="mt-2 w-50"
-                  onChange={(e) => setCpf(e.target.value)}
-                />
+                <>
+                  <Form.Control
+                    required
+                    type="text"
+                    placeholder="CPF ou CNPJ"
+                    value={cpfCnpj}
+                    className="mt-2 w-50"
+                    onChange={handleCpfCnpjChange}
+                  />
+                  {cpfCnpj && !clienteSelecionado && (
+                    <small className="text-danger">
+                      Cliente não encontrado para este CPF/CNPJ.
+                    </small>
+                  )}
+                </>
               )}
             </div>
           </Card.Body>
@@ -265,6 +377,12 @@ export default function Vendas() {
                             alterarQuantidade(item.idProduto, item.qtd + 1)
                           }
                           className="border ms-2"
+                          disabled={item.qtd >= (item.estoque?.quantidade ?? 0)} // <-- aqui
+                          style={
+                            item.qtd >= (item.estoque?.quantidade ?? 0)
+                              ? { cursor: "not-allowed", opacity: 0.5 }
+                              : {}
+                          }
                         >
                           <Plus size={12} />
                         </Button>
@@ -295,119 +413,188 @@ export default function Vendas() {
                 <i className="bi bi-wallet2 me-2"></i> Pagamento
               </h6>
 
-              <div className="d-flex gap-2 align-items-center mb-3">
-                <Form.Select
-                  className="w-50"
-                  value={novoPagamento.tipoPagamento}
-                  onChange={(e) =>
-                    setNovoPagamento({
-                      ...novoPagamento,
-                      tipoPagamento: e.target.value,
-                    })
-                  }
-                >
-                  <option value="cash">Dinheiro</option>
-                  <option value="card">Cartão</option>
-                  <option value="pix">PIX</option>
-                </Form.Select>
+              <Col md={12} className="mb-3">
+                <Form.Check
+                  type="switch"
+                  id="pagamentoMultiploSwitch"
+                  label="Pagamento com mais de uma forma?"
+                  checked={pagamentoMultiplo}
+                  onChange={() => setPagamentoMultiplo(!pagamentoMultiplo)}
+                />
+              </Col>
 
-                <Button
-                  variant="outline-primary"
-                  className="d-flex align-items-center"
-                  onClick={() => {
-                    // Calcula quanto falta pagar
-                    const totalPago = pagamentos.reduce(
-                      (acc, p) => acc + p.valor,
-                      0
-                    );
-                    const valorRestante = total - totalPago;
-
-                    if (valorRestante <= 0) {
-                      notifyInfo("Nenhum valor restante para pagar.");
-                      return;
-                    }
-
-                    const novoArray = [
-                      ...pagamentos,
-                      {
-                        tipoPagamento: novoPagamento.tipoPagamento,
-                        valor: valorRestante,
-                      },
-                    ];
-
-                    // Se houver mais de um tipo, ativa multiPagamentos
-                    if (
-                      pagamentos.length > 0 &&
-                      novoPagamento.tipoPagamento !==
-                        pagamentos[0].tipoPagamento
-                    ) {
-                      setMultiPagamentos(true);
-                    }
-
-                    setPagamentos(novoArray);
-                  }}
-                >
-                  <Plus size={18} className="me-1" /> Pagar Total
-                </Button>
-              </div>
-
-              {pagamentos.length > 0 && (
+              {pagamentoMultiplo ? (
                 <>
-                  <Card className="border-light shadow-sm mb-3">
-                    <Card.Body className="p-2">
-                      {pagamentos.map((p, i) => {
-                        const Icon = paymentIcons[p.tipoPagamento];
-                        return (
-                          <div
-                            key={i}
-                            className="d-flex justify-content-between align-items-center border-bottom py-2"
-                          >
-                            <div className="d-flex align-items-center gap-2">
-                              <Icon size={18} />
-                              <span>
-                                {paymentLabels[p.tipoPagamento]} –{" "}
-                                <strong>R$ {p.valor.toFixed(2)}</strong>
-                              </span>
-                            </div>
-                            <Button
-                              variant="outline-danger"
-                              size="sm"
-                              onClick={() => {
-                                setPagamentos(
-                                  pagamentos.filter((_, idx) => idx !== i)
-                                );
-                                setMultiPagamentos(pagamentos.length - 1 > 1);
-                              }}
-                            >
-                              Remover
-                            </Button>
-                          </div>
-                        );
-                      })}
-                    </Card.Body>
-                  </Card>
+                  <div className="d-flex gap-2 align-items-center mb-3">
+                    <Form.Select
+                      className="w-25"
+                      value={novoPagamento.tipoPagamento}
+                      onChange={(e) =>
+                        setNovoPagamento({
+                          ...novoPagamento,
+                          tipoPagamento: e.target.value,
+                        })
+                      }
+                    >
+                      <option value="cash">Dinheiro</option>
+                      <option value="card">Cartão</option>
+                      <option value="pix">PIX</option>
+                    </Form.Select>
 
-                  <div className="fw-semibold text-dark">
-                    <div>
-                      Total Pago:{" "}
-                      <span className="text-success">
-                        R$
-                        {pagamentos
-                          .reduce((acc, p) => acc + p.valor, 0)
-                          .toFixed(2)}
-                      </span>
-                    </div>
-                    <div>
-                      Falta Pagar:{" "}
-                      <span className="text-danger">
-                        R$
-                        {Math.max(
-                          0,
-                          total -
-                            pagamentos.reduce((acc, p) => acc + p.valor, 0)
-                        ).toFixed(2)}
-                      </span>
-                    </div>
+                    <NumericFormat
+                      className="form-control w-25"
+                      value={novoPagamento.valor}
+                      placeholder="Valor"
+                      thousandSeparator="."
+                      decimalSeparator=","
+                      decimalScale={2}
+                      fixedDecimalScale
+                      allowNegative={false}
+                      onValueChange={(values) => {
+                        const { floatValue } = values;
+                        setNovoPagamento({
+                          ...novoPagamento,
+                          valor: floatValue ?? 0,
+                        });
+                      }}
+                    />
+
+                    <Button
+                      variant="outline-primary"
+                      onClick={() => {
+                        const totalPago = pagamentos.reduce(
+                          (acc, p) => acc + p.valor,
+                          0
+                        );
+                        const valorRestante = total - totalPago;
+
+                        if (!novoPagamento.valor || novoPagamento.valor <= 0) {
+                          notifyInfo("Digite um valor válido.");
+                          return;
+                        }
+
+                        if (novoPagamento.valor > valorRestante) {
+                          notifyInfo(
+                            "Valor informado excede o valor restante."
+                          );
+                          return;
+                        }
+
+                        const existe = pagamentos.find(
+                          (p) => p.tipoPagamento === novoPagamento.tipoPagamento
+                        );
+                        let novoArray = [];
+
+                        if (existe) {
+                          novoArray = pagamentos.map((p) =>
+                            p.tipoPagamento === novoPagamento.tipoPagamento
+                              ? { ...p, valor: p.valor + novoPagamento.valor }
+                              : p
+                          );
+                        } else {
+                          novoArray = [...pagamentos, { ...novoPagamento }];
+                        }
+
+                        setPagamentos(novoArray);
+                        setNovoPagamento({ tipoPagamento: "cash", valor: 0 });
+                      }}
+                    >
+                      <Plus size={18} className="me-1" /> Adicionar
+                    </Button>
+                  </div>
+
+                  {pagamentos.length > 0 && (
+                    <>
+                      <Card className="border-light shadow-sm mb-3">
+                        <Card.Body className="p-2">
+                          {pagamentos.map((p, i) => {
+                            const Icon = paymentIcons[p.tipoPagamento];
+                            return (
+                              <div
+                                key={i}
+                                className="d-flex justify-content-between align-items-center border-bottom py-2"
+                              >
+                                <div className="d-flex align-items-center gap-2">
+                                  <Icon size={18} />
+                                  <span>
+                                    {paymentLabels[p.tipoPagamento]} –{" "}
+                                    <strong>R$ {p.valor.toFixed(2)}</strong>
+                                  </span>
+                                </div>
+                                <Button
+                                  variant="outline-danger"
+                                  size="sm"
+                                  onClick={() => {
+                                    setPagamentos(
+                                      pagamentos.filter((_, idx) => idx !== i)
+                                    );
+                                    setMultiPagamentos(
+                                      pagamentos.length - 1 > 1
+                                    );
+                                  }}
+                                >
+                                  Remover
+                                </Button>
+                              </div>
+                            );
+                          })}
+                        </Card.Body>
+                      </Card>
+
+                      <div className="fw-semibold text-dark">
+                        <div>
+                          Total Pago:{" "}
+                          <span className="text-success">
+                            R$
+                            {pagamentos
+                              .reduce((acc, p) => acc + p.valor, 0)
+                              .toFixed(2)}
+                          </span>
+                        </div>
+                        <div>
+                          Falta Pagar:{" "}
+                          <span className="text-danger">
+                            R$
+                            {Math.max(
+                              0,
+                              total -
+                                pagamentos.reduce((acc, p) => acc + p.valor, 0)
+                            ).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="d-flex justify-content-between gap-2 mb-3">
+                    {["cash", "card", "pix"].map((method) => {
+                      const Icon = paymentIcons[method];
+                      return (
+                        <button
+                          key={method}
+                          onClick={() => setPaymentMethod(method)}
+                          type="button"
+                          className={`flex-grow-1 text-center py-3 rounded-3 border ${
+                            paymentMethod === method
+                              ? "bg-selected-payment text-white border-dark"
+                              : "bg-white text-dark border-secondary-subtle"
+                          }`}
+                          style={{
+                            transition: "all 0.2s ease-in-out",
+                            fontSize: "0.9rem",
+                          }}
+                        >
+                          <div className="mb-1 d-flex justify-content-center">
+                            <Icon className="fs-5" />
+                          </div>
+                          <span className="fw-semibold">
+                            {paymentLabels[method]}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </>
               )}

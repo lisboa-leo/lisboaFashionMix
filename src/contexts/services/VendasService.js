@@ -1,5 +1,16 @@
 import API from "./api.jsx";
 
+export async function listarVendas() {
+  const URL = "/api/vendas/listarVendas";
+  try {
+    const response = await API.get(URL);
+    return response.data;
+  } catch (error) {
+    console.log(error);
+    return false;
+  }
+}
+
 export async function salvarVenda(venda) {
   const URL = "/api/vendas";
   try {
